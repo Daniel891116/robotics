@@ -32,7 +32,7 @@ org_x = 661
 org_y = 785
 pic_x = 640
 pic_y = 480
-cube_threshold = (15000,5000)
+cube_threshold = (30000,5000)
 pxl2mm = 25 / math.sqrt(7743.5)
 picDistThreshold = 62500
 
@@ -47,13 +47,11 @@ def visualize(img,labels,cubes):
     ax2.axis('off')
     label_map = np.zeros_like(dst)
     for obj in cubes:
-        angle = 90-obj['orientation']
-        slope = math.tan(angle * math.pi / 180)
+        angle = (90-obj['orientation']) * math.pi / 180
+        slope = math.tan(angle)
         (cx, cy) = obj['real_center']
-        # L_point = (0, -cx * slope + cy)
-        # R_point = (label_map.shape[1], (label_map.shape[1] - cx) * slope + cy)
-        L_point = (cx - 30,cy - 30 * slope)
-        R_point = (cx + 30,cy + 30 * slope)
+        L_point = (cx - 30 * math.cos(angle),cy - 30 * math.sin(angle))
+        R_point = (cx + 30 * math.cos(angle),cy + 30 * math.sin(angle))
         ax2.plot((L_point[0], R_point[0]), (L_point[1], R_point[1]), color = 'w', linewidth = 1)
     fig.tight_layout()
     plt.show()
@@ -97,9 +95,15 @@ def cube_locate(img):
             obj['real_center'] = (cx,cy)
             obj['picDist'] = (cx-pic_x)**2 + (cy-pic_y)**2
             # get angle from rotated rectangle
-            angle = 90-rotrect[-1]
-            while abs(angle) > 45:
-                angle = angle + 90 if angle < 0 else angle - 90
+            width = rotrect[1][0]
+            height = rotrect[1][1]
+            if width < height:
+                angle = -rotrect[-1]
+            else:
+                angle = 90-rotrect[-1]
+            # wrap2Pi
+            while abs(angle) > 90:
+                angle = angle + 180 if angle < 0 else angle - 180
             obj['orientation'] = angle
             cubes.append(obj)
     # visualize(img,labels,cubes)
