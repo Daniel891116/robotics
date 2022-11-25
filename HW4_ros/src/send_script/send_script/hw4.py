@@ -30,8 +30,33 @@ threshold = 40 # ?
 kernelSize = 10
 org_x = 661
 org_y = 785
-cube_threshold = 5000
+pic_x = 640
+pic_y = 480
+cube_threshold = (15000,5000)
 pxl2mm = 25 / math.sqrt(7743.5)
+picDistThreshold = 62500
+
+def visualize(img,labels,cubes):
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    # visualize
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
+    ax1.imshow(img, interpolation='nearest') # plt.cm.gray, 
+    ax1.axis('off')
+    dst=color.label2rgb(labels)  # label colors to different groups
+    ax2.imshow(dst,interpolation='nearest')
+    ax2.axis('off')
+    label_map = np.zeros_like(dst)
+    for obj in cubes:
+        angle = 90-obj['orientation']
+        slope = math.tan(angle * math.pi / 180)
+        (cx, cy) = obj['real_center']
+        # L_point = (0, -cx * slope + cy)
+        # R_point = (label_map.shape[1], (label_map.shape[1] - cx) * slope + cy)
+        L_point = (cx - 30,cy - 30 * slope)
+        R_point = (cx + 30,cy + 30 * slope)
+        ax2.plot((L_point[0], R_point[0]), (L_point[1], R_point[1]), color = 'w', linewidth = 1)
+    fig.tight_layout()
+    plt.show()
 
 def img_preprocess(orginalImg):
     img = cv2.cvtColor(orginalImg, cv2.COLOR_RGB2GRAY) # BGR2GRAY
@@ -45,72 +70,49 @@ def img_preprocess(orginalImg):
 
     # clear border, imclearborder
     # image open and close
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernelSize, kernelSize)) # MORPH_ELLIPSE, MORPH_CROSS, MORPH_RECT
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernelSize, kernelSize)) # MORPH_ELLIPSE, MORPH_CROSS
     img = cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
     img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
-    
     # regionprops
+    _, contours, hierarchy = cv2.findContours(image=img, mode=cv2.RETR_LIST, method=cv2.CHAIN_APPROX_NONE)
     labels = skiMeasure.label(img, connectivity = 2)
-    return labels
-
-def visualize(img):
-    labels = img_preprocess(img)
-    # visualize
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
-    ax1.imshow(img, plt.cm.gray, interpolation='nearest')
-    ax1.axis('off')
-    dst=color.label2rgb(labels)  # label colors to different groups
-    ax2.imshow(dst,interpolation='nearest')
-    ax2.axis('off')
-
-    regions = skiMeasure.regionprops(labels)
-    for region in regions:
-        if region.area < cube_threshold:
-            continue
-        print("Centroid",region.centroid)
-        y0, x0 = region.centroid
-        orientation = region.orientation
-        print("Degree", 180*orientation/math.pi)
-        x1 = x0 + math.cos(orientation) * 0.5 * region.minor_axis_length
-        y1 = y0 - math.sin(orientation) * 0.5 * region.minor_axis_length
-        x2 = x0 - math.sin(orientation) * 0.5 * region.minor_axis_length
-        y2 = y0 - math.cos(orientation) * 0.5 * region.minor_axis_length
-
-        ax2.plot((x0, x1), (y0, y1), '-r', linewidth=2.5)
-        ax2.plot((x0, x2), (y0, y2), '-r', linewidth=2.5)
-        ax2.plot(x0, y0, '.g', markersize=15)
-
-    fig.tight_layout()
-    plt.show()
+    return labels, contours
 
 def cube_locate(img):
-    visualize(img)
     region_cnt = 0
     cubes = []
-    labels = img_preprocess(img)
-    regions = skiMeasure.regionprops(labels)
-    for region in regions:
-        if region.area < cube_threshold:
-            continue
-        region_cnt += 1
-        y0, x0 = region.centroid
-        orientation = region.orientation
-        dstx = (x0 - org_x) * pxl2mm
-        dsty = (y0 - org_y) * pxl2mm
-        dst_rot = 180*orientation/math.pi
+    labels, contours = img_preprocess(img)
 
-        # rotation mapping
-        while abs(dst_rot) > 45:
-            dst_rot = dst_rot + 90 if dst_rot < 0 else dst_rot - 90
-        cubes.append([dstx, dsty, dst_rot])
-    print("regions number: ", region_cnt)
-    if region_cnt == 0:
+    for cnt in contours:
+        if cv2.contourArea(cnt) > cube_threshold[1] and cv2.contourArea(cnt) < cube_threshold[0]:   
+            obj = dict()
+            M = cv2.moments(cnt)
+            cx = int(M['m10']/M['m00'])
+            cy = int(M['m01']/M['m00'])         
+            # get rotated rectangle from outer contour
+            rotrect = cv2.minAreaRect(cnt)
+            box = cv2.boxPoints(rotrect)
+            box = np.int0(box)
+            obj['center'] = ((cx - org_x) * pxl2mm, (cy - org_y) * pxl2mm)
+            obj['real_center'] = (cx,cy)
+            obj['picDist'] = (cx-pic_x)**2 + (cy-pic_y)**2
+            # get angle from rotated rectangle
+            angle = 90-rotrect[-1]
+            while abs(angle) > 45:
+                angle = angle + 90 if angle < 0 else angle - 90
+            obj['orientation'] = angle
+            cubes.append(obj)
+    # visualize(img,labels,cubes)
+    if len(cubes) == 0:
         return None
     else:
         # TODO
         # try to find the optimal cube to grab
-        print(f"picX: {dstx}, pixY: {dsty}, picRot: {dst_rot}")
-        return dstx, dsty, dst_rot
+        cubes = sorted(cubes, key = lambda cube: cube['picDist'])
+        dstx = cubes[0]['center'][0]
+        dsty = cubes[0]['center'][1]
+        dst_rot = cubes[0]['orientation']
+        return cubes[0]
 
 ################################################################
 
@@ -192,35 +194,53 @@ class HW4(Node):
         # cv2.imwrite(f"output_{count}.png", image)
         pos = cube_locate(img)
         if pos is not None:
-            [picX, picY, picRot] = pos
-            
-            self.currentX += picX / 2**0.5
-            self.currentY -= picX / 2**0.5
-            self.currentX -= picY / 2**0.5
-            self.currentY -= picY / 2**0.5
-            self.currentPsi += picRot
+            if pos['picDist'] > picDistThreshold:
+                # move to capture another photo instead
+                # ((cx - org_x) * pxl2mm, (cy - org_y) * pxl2mm)
+                picX = (pos['real_center'][0] - pic_x) * pxl2mm
+                picY = (pos['real_center'][1] - pic_y) * pxl2mm
 
-            skyHigh = f"{self.currentX}, {self.currentY}, {self.picBaseZ}, -180, 0, {self.currentPsi}"
-            self.moveTo(skyHigh)
-            set_io(0.0) # open gripper
+                self.currentX += picX / 2**0.5
+                self.currentY -= picX / 2**0.5
+                self.currentX -= picY / 2**0.5
+                self.currentY -= picY / 2**0.5
 
-            groundLow = f"{self.currentX}, {self.currentY}, {self.pickUpZ}, -180, 0, {self.currentPsi}"
-            self.moveTo(groundLow)
-            set_io(1.0) # close gripper
+                skyHigh = f"{self.currentX}, {self.currentY}, {self.picBaseZ}, -180, 0, {self.currentPsi}"
+                self.moveTo(skyHigh)
 
-            self.moveTo(skyHigh)
-            stackSky = f"{self.stackX}, {self.stackY}, {self.picBaseZ}, -180, 0, {self.stackPsi}"
-            self.moveTo(stackSky)
-            stackBase = f"{self.stackX}, {self.stackY}, {self.stackZ}, -180, 0, {self.stackPsi}"
-            self.moveTo(stackBase)
-            set_io(0.0) # open gripper
-            self.moveTo(stackSky)
-            self.stackZ += 25 # block height
+                send_script("Vision_DoJob(job1)")
+                return
+            else:
+                picX = pos['center'][0]
+                picY = pos['center'][1]
+                picRot = pos['orientation']
+                
+                self.currentX += picX / 2**0.5
+                self.currentY -= picX / 2**0.5
+                self.currentX -= picY / 2**0.5
+                self.currentY -= picY / 2**0.5
+                self.currentPsi += picRot
 
-            self.backBase()
-            return
+                skyHigh = f"{self.currentX}, {self.currentY}, {self.picBaseZ}, -180, 0, {self.currentPsi}"
+                self.moveTo(skyHigh)
+                set_io(0.0) # open gripper
+
+                groundLow = f"{self.currentX}, {self.currentY}, {self.pickUpZ}, -180, 0, {self.currentPsi}"
+                self.moveTo(groundLow)
+                set_io(1.0) # close gripper
+
+                self.moveTo(skyHigh)
+                stackSky = f"{self.stackX}, {self.stackY}, {self.picBaseZ}, -180, 0, {self.stackPsi}"
+                self.moveTo(stackSky)
+                stackBase = f"{self.stackX}, {self.stackY}, {self.stackZ}, -180, 0, {self.stackPsi}"
+                self.moveTo(stackBase)
+                set_io(0.0) # open gripper
+                self.moveTo(stackSky)
+                self.stackZ += 25 # block height
+
+                self.backBase()
+                return
         else:
-            print("Task done")
             raise self.TaskDoneException
 
     class TaskDoneException(Exception):
