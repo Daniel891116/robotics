@@ -22,6 +22,7 @@ setup(
         'console_scripts': [
 		'send_script=send_script.send_script:main',
 		'img_sub=send_script.image_sub:main',
+        'hw4=send_script.hw4:main',
         ],
     },
 )

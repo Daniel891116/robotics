@@ -9,30 +9,19 @@ from tm_msgs.msg import *
 from tm_msgs.srv import *
 
 from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
 
-import cv2
-def cube_locate(image, count):
-    cv2.imwrite(f"output_{count}.png", image)
 
 class ImageSub(Node):
     def __init__(self, nodeName):
         super().__init__(nodeName)
-        self.subscription = self.create_subscription(Image, 'techman_image', self.image_callback, 10)
-        self.count = 0
-
+        self.subscription = self.create_subscription(Image, 
+        'techman_image', self.image_callback, 10)
+        self.subscription
+    
     def image_callback(self, data):
-        print("Image callback")
-        self.get_logger().info('Received image\n')
+        self.get_logger().info('Received image')
 
         # TODO (write your code here)
-        print("Saving img...")
-        bridge = CvBridge()
-        img = bridge.imgmsg_to_cv2(img_msg=data)
-        self.count+=1
-        cube_locate(img, self.count )
-
-
 
 def send_script(script):
     arm_node = rclpy.create_node('arm')
