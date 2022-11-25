@@ -127,3 +127,16 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Document
+*.pdf
+*.ppt
+*.pages
+*.zip
+
+# Images
+*.jpg
+*.png
+
+# MAC 
+.DS_Store
