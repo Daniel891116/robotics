@@ -15,13 +15,104 @@ from cv_bridge import CvBridge
 
 from time import sleep
 
+################################################################
+
+# import cv2
+import math
+import numpy as np
+from skimage import measure as skiMeasure
+from skimage import color
+import matplotlib.pyplot as plt
+
+# Parameter
+filtSize = 5
+threshold = 40 # ?
+kernelSize = 10
+org_x = 661
+org_y = 785
+cube_threshold = 5000
+pxl2mm = 25 / math.sqrt(7743.5)
+
+def img_preprocess(orginalImg):
+    img = cv2.cvtColor(orginalImg, cv2.COLOR_RGB2GRAY) # BGR2GRAY
+
+    # filter
+    filt = np.ones((filtSize, filtSize), np.float32) / (filtSize**2)
+    img = cv2.filter2D(img.astype('float32'), -1, filt, borderType = cv2.BORDER_CONSTANT)
+
+    # to binary
+    img = (img > threshold).astype('uint8')
+
+    # clear border, imclearborder
+    # image open and close
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernelSize, kernelSize)) # MORPH_ELLIPSE, MORPH_CROSS, MORPH_RECT
+    img = cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
+    img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
+    
+    # regionprops
+    labels = skiMeasure.label(img, connectivity = 2)
+    return labels
+
+def visualize(img):
+    labels = img_preprocess(img)
+    # visualize
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
+    ax1.imshow(img, plt.cm.gray, interpolation='nearest')
+    ax1.axis('off')
+    dst=color.label2rgb(labels)  # label colors to different groups
+    ax2.imshow(dst,interpolation='nearest')
+    ax2.axis('off')
+
+    regions = skiMeasure.regionprops(labels)
+    for region in regions:
+        if region.area < cube_threshold:
+            continue
+        print("Centroid",region.centroid)
+        y0, x0 = region.centroid
+        orientation = region.orientation
+        print("Degree", 180*orientation/math.pi)
+        x1 = x0 + math.cos(orientation) * 0.5 * region.minor_axis_length
+        y1 = y0 - math.sin(orientation) * 0.5 * region.minor_axis_length
+        x2 = x0 - math.sin(orientation) * 0.5 * region.minor_axis_length
+        y2 = y0 - math.cos(orientation) * 0.5 * region.minor_axis_length
+
+        ax2.plot((x0, x1), (y0, y1), '-r', linewidth=2.5)
+        ax2.plot((x0, x2), (y0, y2), '-r', linewidth=2.5)
+        ax2.plot(x0, y0, '.g', markersize=15)
+
+    fig.tight_layout()
+    plt.show()
+
 def cube_locate(img):
-    if True:
+    visualize(img)
+    region_cnt = 0
+    cubes = []
+    labels = img_preprocess(img)
+    regions = skiMeasure.regionprops(labels)
+    for region in regions:
+        if region.area < cube_threshold:
+            continue
+        region_cnt += 1
+        y0, x0 = region.centroid
+        orientation = region.orientation
+        dstx = (x0 - org_x) * pxl2mm
+        dsty = (y0 - org_y) * pxl2mm
+        dst_rot = 180*orientation/math.pi
+
+        # rotation mapping
+        while abs(dst_rot) > 45:
+            dst_rot = dst_rot + 90 if dst_rot < 0 else dst_rot - 90
+        cubes.append([dstx, dsty, dst_rot])
+    print("regions number: ", region_cnt)
+    if region_cnt == 0:
         return None
-    picX = 50
-    picY = 50
-    rot = 45
-    return (picX, picY, rot)
+    else:
+        # TODO
+        # try to find the optimal cube to grab
+        print(f"picX: {dstx}, pixY: {dsty}, picRot: {dst_rot}")
+        return dstx, dsty, dst_rot
+
+################################################################
 
 def send_script(script):
     arm_node = rclpy.create_node('arm')
